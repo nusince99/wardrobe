@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Wardrobe</title>
+<style>
+  :root{
+    --bg:#faf9f7; --fg:#1c1a17; --muted:#6b645c; --line:#e5e1db;
+    --card:#ffffff; --accent:#1c1a17; --shadow:0 1px 3px rgba(0,0,0,.06),0 8px 24px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#141311; --fg:#f0ece6; --muted:#a49c92; --line:#2c2926;
+      --card:#1e1c19; --accent:#f0ece6; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.4); }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  header{max-width:1100px;margin:0 auto;padding:64px 24px 24px;}
+  h1{margin:0;font-size:clamp(28px,5vw,44px);letter-spacing:-.02em;}
+  header p{margin:8px 0 0;color:var(--muted);max-width:52ch;}
+  .filters{max-width:1100px;margin:0 auto;padding:16px 24px;display:flex;flex-wrap:wrap;gap:8px;
+    border-bottom:1px solid var(--line);}
+  .filters button{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--fg);
+    padding:7px 14px;border-radius:999px;font-size:14px;cursor:pointer;transition:.15s;}
+  .filters button:hover{border-color:var(--muted);}
+  .filters button[aria-pressed="true"]{background:var(--accent);color:var(--bg);border-color:var(--accent);}
+  main{max-width:1100px;margin:0 auto;padding:28px 24px 80px;}
+  .grid{columns:280px;column-gap:18px;}
+  figure{break-inside:avoid;margin:0 0 18px;background:var(--card);border:1px solid var(--line);
+    border-radius:14px;overflow:hidden;box-shadow:var(--shadow);cursor:zoom-in;transition:transform .15s;}
+  figure:hover{transform:translateY(-2px);}
+  figure img{display:block;width:100%;height:auto;background:var(--line);}
+  figcaption{padding:12px 14px;font-size:14px;}
+  figcaption .cat{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em;}
+  .empty{color:var(--muted);text-align:center;padding:80px 0;}
+  .empty code{background:var(--card);border:1px solid var(--line);padding:2px 6px;border-radius:6px;}
+  footer{max-width:1100px;margin:0 auto;padding:0 24px 60px;color:var(--muted);font-size:13px;}
+  /* lightbox */
+  .lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;
+    justify-content:center;z-index:50;padding:24px;}
+  .lb.open{display:flex;}
+  .lb img{max-width:100%;max-height:82vh;border-radius:8px;}
+  .lb .cap{position:absolute;bottom:24px;left:0;right:0;text-align:center;color:#fff;font-size:14px;
+    text-shadow:0 1px 3px rgba(0,0,0,.6);padding:0 24px;}
+  .lb button{position:absolute;background:rgba(255,255,255,.12);border:none;color:#fff;
+    width:44px;height:44px;border-radius:999px;font-size:20px;cursor:pointer;}
+  .lb .x{top:20px;right:20px;}
+  .lb .prev{left:16px;top:50%;transform:translateY(-50%);}
+  .lb .next{right:16px;top:50%;transform:translateY(-50%);}
+  .lb button:hover{background:rgba(255,255,255,.25);}
+</style>
+</head>
+<body>
+<header>
+  <h1>My Wardrobe</h1>
+  <p id="intro">A running catalogue of my clothing. Tap any photo to see it full size.</p>
+</header>
+
+<nav class="filters" id="filters" hidden></nav>
+
+<main>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>
+    No photos yet. Add image files to the <code>images/</code> folder and they'll appear here automatically.
+  </div>
+</main>
+
+<footer>
+  Built with GitHub Pages · <span id="count"></span>
+</footer>
+
+<div class="lb" id="lb" aria-hidden="true">
+  <button class="x" id="lbClose" aria-label="Close">&times;</button>
+  <button class="prev" id="lbPrev" aria-label="Previous">&#8249;</button>
+  <button class="next" id="lbNext" aria-label="Next">&#8250;</button>
+  <img id="lbImg" alt="">
+  <div class="cap" id="lbCap"></div>
+</div>
+
+<script>
+// Where the photos live. Just upload image files to this folder on GitHub and
+// they show up here automatically -- no manifest to edit, no build step.
+const GH_OWNER = 'nusince99';
+const GH_REPO  = 'wardrobe';
+const GH_DIR   = 'images';
+const EXTS = ['jpg','jpeg','png','webp','gif','avif'];
+
+const grid = document.getElementById('grid');
+const filtersEl = document.getElementById('filters');
+const emptyEl = document.getElementById('empty');
+let items = [], view = [], active = 'All', lbIndex = 0;
+
+Promise.all([
+  // Optional: manifest.json lets you override the title/category for any photo.
+  fetch('manifest.json?' + Date.now()).then(r => r.ok ? r.json() : []).catch(() => []),
+  // Primary source: the live contents of the images/ folder on GitHub.
+  fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_DIR}`)
+    .then(r => r.ok ? r.json() : []).catch(() => [])
+]).then(([manifest, listing]) => {
+  const overrides = {};
+  (Array.isArray(manifest) ? manifest : manifest.photos || []).forEach(e => {
+    if (e && e.src) overrides[e.src] = e;
+  });
+
+  const files = (Array.isArray(listing) ? listing : [])
+    .filter(f => f.type === 'file' && EXTS.includes((f.name.split('.').pop() || '').toLowerCase()))
+    .map(f => f.name)
+    .sort();
+
+  if (files.length) {
+    items = files.map(name => {
+      const src = GH_DIR + '/' + name;
+      if (overrides[src]) return overrides[src];
+      const g = guessFromName(name);
+      return { src, title: g.title, category: g.category };
+    });
+  } else {
+    // API unavailable (offline / rate limited) -- fall back to manifest.json.
+    items = Array.isArray(manifest) ? manifest : manifest.photos || [];
+  }
+  render();
+});
+
+function guessFromName(filename){
+  const stem = filename.replace(/\.[^.]+$/, '');
+  const pretty = s => {
+    s = s.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return s ? s[0].toUpperCase() + s.slice(1) : s;
+  };
+  const i = stem.indexOf('_');
+  if (i > 0) return { category: pretty(stem.slice(0, i)), title: pretty(stem.slice(i + 1)) };
+  return { category: '', title: pretty(stem) };
+}
+
+function render(){
+  document.getElementById('count').textContent = items.length + (items.length === 1 ? ' item' : ' items');
+  if(!items.length){ emptyEl.hidden = false; return; }
+  emptyEl.hidden = true;
+
+  const cats = ['All', ...[...new Set(items.map(i => i.category).filter(Boolean))].sort()];
+  if(cats.length > 1){
+    filtersEl.hidden = false;
+    filtersEl.innerHTML = '';
+    cats.forEach(c => {
+      const b = document.createElement('button');
+      b.textContent = c;
+      b.setAttribute('aria-pressed', c === active);
+      b.onclick = () => { active = c; render(); };
+      filtersEl.appendChild(b);
+    });
+  }
+
+  view = active === 'All' ? items : items.filter(i => i.category === active);
+  grid.innerHTML = '';
+  view.forEach((it, idx) => {
+    const fig = document.createElement('figure');
+    fig.onclick = () => openLb(idx);
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.src = it.src;
+    img.alt = it.title || '';
+    fig.appendChild(img);
+    if(it.title || it.category){
+      const cap = document.createElement('figcaption');
+      cap.innerHTML = (it.category ? `<div class="cat">${esc(it.category)}</div>` : '') +
+                      (it.title ? esc(it.title) : '');
+      fig.appendChild(cap);
+    }
+    grid.appendChild(fig);
+  });
+}
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+const lb = document.getElementById('lb'), lbImg = document.getElementById('lbImg'), lbCap = document.getElementById('lbCap');
+function openLb(i){ lbIndex = i; showLb(); lb.classList.add('open'); lb.setAttribute('aria-hidden','false'); }
+function closeLb(){ lb.classList.remove('open'); lb.setAttribute('aria-hidden','true'); }
+function showLb(){
+  const it = view[lbIndex];
+  lbImg.src = it.src; lbImg.alt = it.title || '';
+  lbCap.textContent = [it.category, it.title].filter(Boolean).join(' — ');
+}
+function step(d){ lbIndex = (lbIndex + d + view.length) % view.length; showLb(); }
+document.getElementById('lbClose').onclick = closeLb;
+document.getElementById('lbPrev').onclick = e => { e.stopPropagation(); step(-1); };
+document.getElementById('lbNext').onclick = e => { e.stopPropagation(); step(1); };
+lb.onclick = e => { if(e.target === lb) closeLb(); };
+document.addEventListener('keydown', e => {
+  if(!lb.classList.contains('open')) return;
+  if(e.key === 'Escape') closeLb();
+  if(e.key === 'ArrowLeft') step(-1);
+  if(e.key === 'ArrowRight') step(1);
+});
+</script>
+</body>
+</html>
