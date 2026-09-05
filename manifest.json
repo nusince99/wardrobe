@@ -1,1 +1,4 @@
-[]
+[
+  { "src": "images/tshirts_grey-lacoste.jpg", "title": "Grey Lacoste crew neck", "category": "T-Shirts" },
+  { "src": "images/jeans_roy-rogers-blue.jpg", "title": "Roy Roger's mid-wash", "category": "Jeans" }
+]
